@@ -45,9 +45,10 @@ Add `%{v:lua.require'plan-agent'.status()}` to your statusline for
    keeps streaming: it paints immediately, sends `continue` itself (up to
    `max_continuations = 2`), and extends in place.
 2. **Instruction** (`ga` / `:PlanAgentInstruct`): type a note at the cursor
-   line → `◌ agent working…` appears at the anchor with a live char count
-   while the proposal streams → proposal opens in a split → `<CR>` applies
-   it after the anchor (one undo block), `q` rejects.
+   line → a sigil line appears (`<!-- ◌ plan-agent:<id> … -->`) with a live
+   char count while the agent works → the sigil expands into the proposal
+   in place (one undo block, `u` reverts). Delete the sigil and the result
+   is dropped. No windows open; keep writing anywhere meanwhile.
 3. The anchor is an extmark: edits above it don't detach the proposal.
 
 ## Enabling other files

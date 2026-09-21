@@ -88,18 +88,6 @@ check(
 check("ghost cleared", ghost.current() == nil)
 check("accept empty", ghost.accept() == false)
 
--- instruct deliver/accept/reject
-vim.api.nvim_win_set_cursor(win, { 10, 0 })
-instruct.deliver("new line one\nnew line two")
-check("proposal busy", instruct.busy() == true)
-check("proposal accept", instruct.accept() == true)
-local after = vim.api.nvim_buf_get_lines(buf, 10, 12, false)
-check("proposal applied", after[1] == "new line one" and after[2] == "new line two")
-check("proposal idle", instruct.busy() == false)
-instruct.deliver("reject me")
-instruct.reject()
-check("proposal rejected", instruct.busy() == false)
-
 -- gating: paths config plus buffer-local enable/disable
 pa.setup({ paths = { "docs/plans/" } })
 local plans_buf = vim.api.nvim_create_buf(false, true)
@@ -172,10 +160,34 @@ check(
   "prompt built",
   sent_prompt ~= nil and sent_prompt:find("expand it", 1, true) ~= nil
 )
+-- sigil line inserted after the anchor
+local sigil_line = vim.api.nvim_buf_get_lines(ga_buf, 1, 2, false)[1]
+check(
+  "sigil inserted",
+  sigil_line:find("plan-agent:", 1, true) ~= nil
+    and sigil_line:find("expand it", 1, true) ~= nil
+)
+check("instruction busy", instruct.busy() == true)
+-- deliver expands the sigil in place
 instruct.deliver("p1\np2")
-check("marker cleared on deliver", marker_text() == nil)
-check("proposal from ask", instruct.busy() == true)
-instruct.accept()
+local expanded = vim.api.nvim_buf_get_lines(ga_buf, 0, -1, false)
+check(
+  "sigil expanded",
+  #expanded == 4 and expanded[2] == "p1" and expanded[3] == "p2"
+)
+check("instruction idle", instruct.busy() == false)
+-- deleting the sigil vetoes the job
+vim.api.nvim_win_set_cursor(win, { 1, 0 })
+instruct.ask(function(_)
+  return true
+end)
+vim.api.nvim_buf_set_lines(ga_buf, 1, 2, false, {})
+instruct.deliver("zzz")
+local vetoed = vim.api.nvim_buf_get_lines(ga_buf, 0, -1, false)
+check(
+  "sigil veto",
+  #vetoed == 4 and vetoed[2] == "p1" and instruct.busy() == false
+)
 vim.ui.input = orig_input
 
 -- live session round-trip against the fake binary
