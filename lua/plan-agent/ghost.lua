@@ -1,5 +1,7 @@
 --- plan-agent.ghost: extmark ghost overlay for the next completion.
 --- Zero buffer mutation until accept. One pending ghost at a time.
+local log = require("plan-agent.log")
+
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("plan_agent_ghost")
@@ -36,6 +38,7 @@ function M.show(bufnr, text)
     return false
   end
   current = { bufnr = bufnr, row = row, col = col, text = text, id = id }
+  log.debug("ghost shown: len=" .. #text)
   return true
 end
 

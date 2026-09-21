@@ -18,7 +18,31 @@ local ghost = require("plan-agent.ghost")
 local context = require("plan-agent.context")
 local instruct = require("plan-agent.instruct")
 local pa = require("plan-agent.init")
-check("modules load", session and ghost and context and instruct and pa)
+local log = require("plan-agent.log")
+check("modules load", session and ghost and context and instruct and pa and log)
+
+-- ring log
+log.enable_debug(false)
+log.info("hello")
+log.debug("silent")
+check("info recorded", log.count() == 1)
+log.enable_debug(true)
+log.debug("loud")
+check("debug gated", log.count() == 2)
+for i = 1, 250 do
+  log.info("fill " .. i)
+end
+check("ring truncates", log.count() == 200)
+local formatted = log.lines()
+check("lines format", #formatted == 200 and formatted[1]:find("fill 51", 1, true) ~= nil)
+log.open()
+local logbuf = vim.api.nvim_get_current_buf()
+check(
+  "log viewer",
+  vim.api.nvim_buf_get_option(logbuf, "filetype") == "plan-agent-log"
+    and #vim.api.nvim_buf_get_lines(logbuf, 0, -1, false) == 200
+)
+vim.api.nvim_buf_delete(logbuf, { force = true })
 
 -- codec
 check("encode", session.encode_message("hi") == '{"content":"hi"}')

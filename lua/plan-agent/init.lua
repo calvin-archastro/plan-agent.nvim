@@ -2,6 +2,7 @@
 --- Ghost completions via Tab, anchored instructions via g a.
 --- The agent proposes; only your keypress writes the buffer.
 local session = require("plan-agent.session")
+local log = require("plan-agent.log")
 local ghost = require("plan-agent.ghost")
 local context = require("plan-agent.context")
 local instruct = require("plan-agent.instruct")
@@ -17,6 +18,8 @@ local defaults = {
   debounce_ms = 350,
   -- Enabled when the buffer path contains any entry (plain substring).
   paths = { "docs/plans/" },
+  -- Verbose ring-log entries (event flow, triggers, skips).
+  debug = false,
   prompt = "You co-edit a Markdown plan beside the user. "
     .. "Reply with ONLY the requested text: no fences, no explanation.",
 }
@@ -93,9 +96,13 @@ function M.start()
     vim.list_extend(cmd, { "--permission-mode", config.permission_mode })
   end
   last_stderr = {}
+  log.info("start: " .. table.concat(cmd, " "))
   local new_handle, err = session.start({
     cmd = cmd,
     on_event = function(event)
+      log.debug(
+        "event: " .. tostring(event.type) .. " len=" .. #tostring(event.content or "")
+      )
       vim.schedule(function()
         M.on_event(event)
       end)
@@ -130,10 +137,12 @@ function M.start()
     end,
   })
   if not new_handle then
+    log.error("spawn failed: " .. (err or "unknown"))
     vim.notify(err or "plan-agent: cannot start", vim.log.levels.ERROR)
     return false
   end
   handle = new_handle
+  log.info("session running")
   return true
 end
 
@@ -181,7 +190,9 @@ local function send(kind, content)
   ghost.clear()
   pending_kind = kind
   pending_buf = vim.api.nvim_get_current_buf()
+  log.debug("send: kind=" .. kind .. " bytes=" .. #content)
   if not handle.send(content) then
+    log.error("send failed: session is down")
     pending_kind = nil
     pending_buf = nil
     vim.notify("plan-agent: session is down", vim.log.levels.ERROR)
@@ -195,9 +206,11 @@ end
 function M.suggest()
   local bufnr = vim.api.nvim_get_current_buf()
   if not is_enabled(bufnr) then
+    log.debug("suggest skip: buffer not enabled")
     return false
   end
   if instruct.busy() then
+    log.debug("suggest skip: instruction busy")
     return false
   end
   local anchor = vim.api.nvim_win_get_cursor(0)[1]
@@ -254,6 +267,8 @@ end
 ---@param opts table|nil
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+  log.enable_debug(config.debug == true)
+  log.info("setup: debug=" .. tostring(config.debug == true))
   local group = vim.api.nvim_create_augroup("plan_agent", { clear = true })
   vim.api.nvim_create_autocmd({ "CursorMovedI", "TextChangedI" }, {
     group = group,
@@ -271,6 +286,9 @@ function M.setup(opts)
   end, { force = true })
   vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, { force = true })
   vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentLog", function()
+    log.open()
+  end, { force = true })
   -- Exposed for tests.
   M.enabled = is_enabled
   vim.api.nvim_create_user_command("PlanAgentEnable", function()

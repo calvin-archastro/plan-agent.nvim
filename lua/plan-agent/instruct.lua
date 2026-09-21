@@ -2,6 +2,7 @@
 --- The anchor is an extmark, so it tracks edits above it. The agent never
 --- writes the buffer; accept applies the proposal as one undo block.
 local context = require("plan-agent.context")
+local log = require("plan-agent.log")
 
 local M = {}
 
@@ -35,6 +36,7 @@ function M.ask(send)
       return
     end
     pending_anchor = { bufnr = bufnr, extmark = id, instruction = instruction }
+    log.info("instruction asked at line " .. anchor)
     if not send(context.propose_prompt(bufnr, anchor, instruction)) then
       pending_anchor = nil
       pcall(vim.api.nvim_buf_del_extmark, bufnr, anchor_ns, id)
@@ -86,12 +88,14 @@ function M.accept()
   local total = vim.api.nvim_buf_line_count(proposal.bufnr)
   local after = math.min(proposal.anchor, total)
   vim.api.nvim_buf_set_lines(proposal.bufnr, after, after, false, proposal.lines)
+  log.info("proposal accepted: " .. #proposal.lines .. " lines")
   return true
 end
 
 --- Discard the proposal. The buffer is untouched.
 function M.reject()
   M.close_proposal()
+  log.info("proposal rejected")
   vim.notify("plan-agent: proposal rejected", vim.log.levels.INFO)
 end
 

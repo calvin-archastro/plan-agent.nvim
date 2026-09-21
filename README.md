@@ -23,6 +23,7 @@ end }
 | `debounce_ms` | `350` | idle delay before requesting a ghost |
 | `prompt` | co-editing brief | standing `--print` prompt (required by `--stream`) |
 | `paths` | `{ "docs/plans/" }` | enabled when the buffer path contains any entry (plain substring, not repo-root-relative) |
+| `debug` | `false` | verbose ring-log entries (event flow, triggers, skips) |
 
 Suggested keymaps:
 
@@ -55,7 +56,15 @@ Two ways, combinable:
 
 ## Commands
 
-`:PlanAgentStart :PlanAgentStop :PlanAgentStatus :PlanAgentSuggest :PlanAgentInstruct :PlanAgentEnable :PlanAgentDisable`
+`:PlanAgentStart :PlanAgentStop :PlanAgentStatus :PlanAgentSuggest :PlanAgentInstruct :PlanAgentEnable :PlanAgentDisable :PlanAgentLog`
+
+## Diagnosing
+
+`:PlanAgentLog` opens the ring log (last 200 entries): session spawns with
+full argv, sends, event types, ghost renders, instruction lifecycle, exit
+codes with stderr attached. For the full firehose (every event, trigger,
+skip reason), `setup({ debug = true })`. Next time something fails, paste
+the log — no more guessing.
 
 ## Tests
 
