@@ -21,7 +21,11 @@ local defaults = {
   -- Verbose ring-log entries (event flow, triggers, skips).
   debug = false,
   prompt = "You co-edit a Markdown plan beside the user. "
-    .. "Reply with ONLY the requested text: no fences, no explanation.",
+    .. "Reply with ONLY the requested text: no fences, no explanation. "
+    .. "Always finish the thought; never trail off mid-sentence.",
+  -- Auto-continue a ghost that arrives truncated, at most this many extra
+  -- turns per request.
+  max_continuations = 2,
 }
 
 local config = vim.deepcopy(defaults)
@@ -30,6 +34,8 @@ local handle = nil
 local pending_kind = nil ---@type "suggest"|"propose"|nil
 local pending_buf = nil ---@type number|nil
 local pending_seq = 0
+local continuations = 0
+local propose_chars = 0
 local timer = nil
 local last_stderr = {} ---@type string[]
 
@@ -157,6 +163,8 @@ function M.stop()
     handle = nil
   end
   pending_kind = nil
+  pending_buf = nil
+  continuations = 0
   ghost.clear()
 end
 
@@ -171,15 +179,71 @@ function M.on_event(event)
   end
   local kind = pending_kind
   local bufnr = pending_buf
-  pending_kind = nil
-  pending_buf = nil
-  if kind == "suggest" then
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and is_enabled(bufnr) then
-      ghost.show(bufnr, event.content)
-    end
-  elseif kind == "propose" then
-    instruct.deliver(event.content)
+  -- Streaming progress for an open instruction; the pending request stays.
+  if
+    kind == "propose"
+    and (event.type == "assistant_delta" or event.type == "assistant_thinking_delta")
+    and type(event.delta) == "string"
+  then
+    propose_chars = propose_chars + #event.delta
+    instruct.working(propose_chars)
+    return
   end
+  if event.type == "assistant_restart" then
+    propose_chars = 0
+    return
+  end
+  if kind == "suggest" then
+    -- Paint first, then decide: a truncated ghost stays open and extends.
+    if
+      bufnr
+      and vim.api.nvim_buf_is_valid(bufnr)
+      and bufnr == vim.api.nvim_get_current_buf()
+      and is_enabled(bufnr)
+    then
+      local shown = ghost.current()
+      local text = event.content
+      if shown and shown.bufnr == bufnr then
+        text = shown.text .. text
+      end
+      ghost.show(bufnr, text)
+      if
+        M.truncated(event.content)
+        and continuations < config.max_continuations
+        and handle
+        and handle.running()
+      then
+        continuations = continuations + 1
+        log.debug("ghost truncated, continuing (" .. continuations .. ")")
+        -- pending_kind/pending_buf stay: the next event appends.
+        handle.send("continue")
+        return
+      end
+    end
+    pending_kind = nil
+    pending_buf = nil
+    continuations = 0
+  else
+    pending_kind = nil
+    pending_buf = nil
+    continuations = 0
+    if kind == "propose" then
+      instruct.deliver(event.content)
+    end
+  end
+end
+
+--- Truncated when the trimmed text ends mid-thought rather than on a
+--- sentence boundary. Exposed for tests.
+---@param text string
+---@return boolean
+function M.truncated(text)
+  local trimmed = text:gsub("%s+$", "")
+  if trimmed == "" then
+    return true
+  end
+  local last = trimmed:sub(-1)
+  return last:match("[%w,–—(/%-]") ~= nil
 end
 
 local function send(kind, content)
@@ -190,6 +254,8 @@ local function send(kind, content)
   ghost.clear()
   pending_kind = kind
   pending_buf = vim.api.nvim_get_current_buf()
+  continuations = 0
+  propose_chars = 0
   log.debug("send: kind=" .. kind .. " bytes=" .. #content)
   if not handle.send(content) then
     log.error("send failed: session is down")

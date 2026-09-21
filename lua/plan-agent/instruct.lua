@@ -41,8 +41,29 @@ function M.ask(send)
       pending_anchor = nil
       pcall(vim.api.nvim_buf_del_extmark, bufnr, anchor_ns, id)
       vim.notify("plan-agent: session is down", vim.log.levels.ERROR)
+    else
+      M.working(0)
     end
   end)
+end
+
+--- Working marker text at the anchor while the proposal streams.
+---@param chars integer streamed so far
+function M.working(chars)
+  local anchor = pending_anchor
+  if not anchor or not vim.api.nvim_buf_is_valid(anchor.bufnr) then
+    return
+  end
+  local text = chars > 0 and ("◌ agent working… " .. chars .. " chars") or "◌ agent working…"
+  local pos = vim.api.nvim_buf_get_extmark_by_id(anchor.bufnr, anchor_ns, anchor.extmark, {})
+  if not pos or not pos[1] then
+    return
+  end
+  pcall(vim.api.nvim_buf_set_extmark, anchor.bufnr, anchor_ns, pos[1], pos[2], {
+    id = anchor.extmark,
+    virt_text = { { text, "Comment" } },
+    virt_text_pos = "eol",
+  })
 end
 
 --- Deliver assistant text: resolve the open instruction into a proposal.

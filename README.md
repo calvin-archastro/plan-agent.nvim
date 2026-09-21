@@ -41,10 +41,13 @@ Add `%{v:lua.require'plan-agent'.status()}` to your statusline for
 ## Flows
 
 1. **Ghost**: pause in a plan file → grey inline text → `<Tab>` inserts,
-   moving on or a new request dismisses.
+   moving on or a new request dismisses. A ghost that arrives mid-thought
+   keeps streaming: it paints immediately, sends `continue` itself (up to
+   `max_continuations = 2`), and extends in place.
 2. **Instruction** (`ga` / `:PlanAgentInstruct`): type a note at the cursor
-   line → proposal opens in a split → `<CR>` applies it after the anchor
-   (one undo block), `q` rejects.
+   line → `◌ agent working…` appears at the anchor with a live char count
+   while the proposal streams → proposal opens in a split → `<CR>` applies
+   it after the anchor (one undo block), `q` rejects.
 3. The anchor is an extmark: edits above it don't detach the proposal.
 
 ## Enabling other files

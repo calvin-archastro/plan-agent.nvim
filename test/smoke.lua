@@ -127,6 +127,57 @@ check(
   cmd2[1] == "node" and cmd2[2] == "/x/dist/index.js" and cmd2[3] == "agents"
 )
 
+-- truncation predicate
+check("truncated period", pa.truncated("ends complete.") == false)
+check("truncated question", pa.truncated("really?") == false)
+check("truncated colon", pa.truncated("item:") == false)
+check("truncated hyphen", pa.truncated("mid-sent") == true)
+check("truncated comma", pa.truncated("abc,") == true)
+check("truncated empty", pa.truncated("  ") == true)
+check("truncated paren", pa.truncated("(see") == true)
+
+-- ga working marker (stubbed input and send: deterministic, no session)
+local ga_buf = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_name(ga_buf, "/repo/docs/plans/ga.md")
+vim.api.nvim_buf_set_lines(ga_buf, 0, -1, false, { "a", "b" })
+vim.api.nvim_win_set_buf(win, ga_buf)
+vim.api.nvim_win_set_cursor(win, { 1, 0 })
+local orig_input = vim.ui.input
+vim.ui.input = function(_, cb)
+  cb("expand it")
+end
+local sent_prompt = nil
+instruct.ask(function(content)
+  sent_prompt = content
+  return true
+end)
+local anchor_ns = vim.api.nvim_create_namespace("plan_agent_anchor")
+local function marker_text()
+  local marks = vim.api.nvim_buf_get_extmarks(ga_buf, anchor_ns, 0, -1, { details = true })
+  for _, m in ipairs(marks) do
+    local vt = m[4] and m[4].virt_text
+    if vt then
+      return vt[1][1]
+    end
+  end
+  return nil
+end
+check("working marker", marker_text() == "◌ agent working…")
+instruct.working(150)
+check(
+  "working progress",
+  (marker_text() or ""):find("150 chars", 1, true) ~= nil
+)
+check(
+  "prompt built",
+  sent_prompt ~= nil and sent_prompt:find("expand it", 1, true) ~= nil
+)
+instruct.deliver("p1\np2")
+check("marker cleared on deliver", marker_text() == nil)
+check("proposal from ask", instruct.busy() == true)
+instruct.accept()
+vim.ui.input = orig_input
+
 -- live session round-trip against the fake binary
 local got_events = {}
 local h, err = session.start({
@@ -148,6 +199,26 @@ check(
 )
 h.stop()
 check("session stopped", h.running() == false)
+
+-- continuation: fake replies end in digits (truncated), so one suggest
+-- must chain a "continue" and append both turns into one ghost
+pa.setup({ binary = root .. "/test/fake-archdev.py", max_continuations = 1 })
+local cont_buf = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_name(cont_buf, "/repo/docs/plans/cont.md")
+vim.api.nvim_buf_set_lines(cont_buf, 0, -1, false, { "hello" })
+vim.api.nvim_win_set_buf(win, cont_buf)
+vim.api.nvim_win_set_cursor(win, { 1, 5 })
+check("continuation suggest sent", pa.suggest() == true)
+vim.wait(5000, function()
+  local g = ghost.current()
+  return g ~= nil and select(2, g.text:gsub("echo", "")) == 2
+end)
+local chained = ghost.current()
+check(
+  "continuation appended",
+  chained ~= nil and select(2, chained.text:gsub("echo", "")) == 2
+)
+pa.stop()
 
 if fails == 0 then
   print("ALL PASS")
