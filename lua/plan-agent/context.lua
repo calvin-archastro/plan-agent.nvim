@@ -128,4 +128,28 @@ function M.propose_prompt(bufnr, anchor, instruction, diff)
   return table.concat(parts, "\n")
 end
 
+--- Whole-document pass prompt: the full doc plus one instruction.
+---@param bufnr number
+---@param instruction string
+---@param diff string|nil unified diff of local edits
+---@return string
+function M.pass_prompt(bufnr, instruction, diff)
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local parts = {
+    "File: " .. path,
+    "Instruction for a full-document pass: " .. instruction,
+    "Complete current document:",
+    table.concat(lines, "\n"),
+  }
+  local section = M.diff_section(diff)
+  if section then
+    parts[#parts + 1] = section
+  end
+  parts[#parts + 1] = "Task: apply the instruction to the whole document above. "
+    .. "Reply with ONLY the complete revised document, no fences, no explanation, no narration. "
+    .. "Keep every part outside the instruction's scope byte-identical."
+  return table.concat(parts, "\n")
+end
+
 return M

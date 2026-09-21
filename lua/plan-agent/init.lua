@@ -31,7 +31,8 @@ local defaults = {
 local config = vim.deepcopy(defaults)
 ---@type table|nil session handle from session.start
 local handle = nil
-local pending_kind = nil ---@type "suggest"|"propose"|nil
+local pending_kind = nil ---@type "suggest"|"propose"|"pass"|nil
+local pass_snapshot = nil ---@type string|nil buffer text at pass send
 local pending_buf = nil ---@type number|nil
 local pending_pos = nil ---@type { row: integer, col: integer }|nil
 local pending_seq = 0
@@ -189,6 +190,7 @@ function M.stop()
   pending_kind = nil
   pending_buf = nil
   pending_pos = nil
+  pass_snapshot = nil
   continuations = 0
   ghost.clear()
 end
@@ -256,6 +258,9 @@ function M.on_event(event)
     continuations = 0
     if kind == "propose" then
       instruct.deliver(event.content)
+    elseif kind == "pass" then
+      M.deliver_pass(bufnr, event.content, pass_snapshot)
+      pass_snapshot = nil
     end
   end
 end
@@ -387,6 +392,19 @@ function M.instruct_visual()
     vim.notify("plan-agent: not enabled here (:PlanAgentEnable)", vim.log.levels.WARN)
     return
   end
+  local sm = vim.fn.getpos("'<")
+  local em = vim.fn.getpos("'>")
+  log.info(
+    string.format(
+      "visual: mode=%s bufnr=%d '<=%d:%d '>=%d:%d",
+      vim.fn.mode(),
+      bufnr,
+      sm[1],
+      sm[2],
+      em[1],
+      em[2]
+    )
+  )
   local range = M.visual_range()
   if not range then
     vim.notify("plan-agent: no selection", vim.log.levels.WARN)
@@ -405,12 +423,87 @@ function M.instruct_visual()
   })
 end
 
+--- Apply a whole-document pass result. Drops (buffer untouched) when the
+--- reply is chatty, when the buffer changed since the pass started, or
+--- when the reply is empty. Snapshot is passed in so tests can drive this
+--- directly. Exposed for tests.
+---@param bufnr number|nil
+---@param text string
+---@param snapshot string|nil buffer text at send time
+function M.deliver_pass(bufnr, text, snapshot)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if instruct.chatty(text) then
+    log.info("pass dropped: chatty reply")
+    vim.notify(
+      "plan-agent: agent asked for clarification, pass dropped",
+      vim.log.levels.WARN
+    )
+    return
+  end
+  local current =
+    table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  if snapshot and current ~= snapshot then
+    log.info("pass dropped: buffer changed mid-pass")
+    vim.notify(
+      "plan-agent: buffer changed during pass, dropped (rerun gA)",
+      vim.log.levels.WARN
+    )
+    return
+  end
+  local lines = vim.split(text, "\n", { plain = true })
+  while #lines > 0 and lines[#lines] == "" do
+    lines[#lines] = nil
+  end
+  if #lines == 0 then
+    log.info("pass: empty reply, no changes")
+    vim.notify("plan-agent: pass made no changes", vim.log.levels.INFO)
+    return
+  end
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  log.info("pass applied: " .. #lines .. " lines")
+  vim.notify("plan-agent: pass applied (u to undo)", vim.log.levels.INFO)
+end
+
+--- Whole-document editing pass. Optional instruction arg; otherwise prompts.
+--- The buffer snapshot guards against clobbering your typing mid-pass.
+---@param instruction string|nil
+function M.pass_ask(instruction)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not is_enabled(bufnr) then
+    vim.notify("plan-agent: not enabled here (:PlanAgentEnable)", vim.log.levels.WARN)
+    return
+  end
+  local function go(instr)
+    if instr == nil or instr == "" then
+      return
+    end
+    pass_snapshot =
+      table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+    if not send("pass", context.pass_prompt(bufnr, instr, M.snapshot_diff(bufnr))) then
+      pass_snapshot = nil
+    end
+  end
+  if instruction and instruction ~= "" then
+    go(instruction)
+  else
+    vim.ui.input({ prompt = "@agent pass " }, go)
+  end
+end
+
 --- Plugin setup. Call once from your config.
 ---@param opts table|nil
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
   log.enable_debug(config.debug == true)
   log.info("setup: debug=" .. tostring(config.debug == true))
+  pcall(function()
+    local src = debug.getinfo(1, "S").source:gsub("^@", "")
+    local root = vim.fn.fnamemodify(src, ":h:h:h")
+    local rev = vim.fn.system({ "git", "-C", root, "rev-parse", "--short", "HEAD" })
+    log.info("setup: src=" .. src .. " rev=" .. tostring(rev):gsub("%s+", ""))
+  end)
   local group = vim.api.nvim_create_augroup("plan_agent", { clear = true })
   vim.api.nvim_create_autocmd({ "CursorMovedI", "TextChangedI" }, {
     group = group,
@@ -429,6 +522,9 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, { force = true })
   vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, { force = true })
   vim.api.nvim_create_user_command("PlanAgentVisual", M.instruct_visual, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentPass", function(opts)
+    M.pass_ask(opts.args ~= "" and opts.args or nil)
+  end, { force = true, nargs = "?" })
   vim.api.nvim_create_user_command("PlanAgentLog", function()
     log.open()
   end, { force = true })

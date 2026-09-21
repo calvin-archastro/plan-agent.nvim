@@ -292,6 +292,26 @@ check(
 )
 vim.ui.input = orig_input
 
+-- whole-document pass prompt and delivery
+local pass_text = context.pass_prompt(snap_buf, "tighten it", nil)
+check(
+  "pass prompt",
+  pass_text:find("tighten it", 1, true) ~= nil
+    and pass_text:find("Complete current document:", 1, true) ~= nil
+    and pass_text:find("Task: apply the instruction", 1, true) ~= nil
+)
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b", "c" })
+pa.deliver_pass(snap_buf, "a\nB\nc\n", "a\nb\nc")
+local passed = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check("pass applied", #passed == 3 and passed[2] == "B")
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b", "CHANGED" })
+pa.deliver_pass(snap_buf, "a\nB\nc", "a\nb\nc")
+local kept_pass = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check("pass dropped on edit", #kept_pass == 3 and kept_pass[3] == "CHANGED")
+pa.deliver_pass(snap_buf, "I'm ready – send the plan", "a\nb\nCHANGED")
+local kept_chatty = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check("pass drops chatty", #kept_chatty == 3 and kept_chatty[3] == "CHANGED")
+
 -- live session round-trip against the fake binary
 local got_events = {}
 local h, err = session.start({
