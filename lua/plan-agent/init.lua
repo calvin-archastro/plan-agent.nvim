@@ -363,16 +363,14 @@ function M.instruct_ask()
   })
 end
 
---- Current visual selection as a 0-indexed [start, exclusive end) range.
---- Whole lines; a charwise selection rounds out. Nil when not visual.
+--- Last visual selection as a 0-indexed [start, exclusive end) range.
+--- Whole lines; a charwise selection rounds out. Uses the '< and '> marks:
+--- an x-mode Lua mapping runs after visual mode has already exited, so
+--- mode()/getpos("v") can no longer see the selection. Nil when no marks.
 ---@return { srow: integer, erow: integer }|nil
 function M.visual_range()
-  local mode = vim.fn.mode()
-  if mode ~= "v" and mode ~= "V" and mode ~= "\22" then
-    return nil
-  end
-  local start_line = vim.fn.getpos("v")[2]
-  local end_line = vim.fn.getpos(".")[2]
+  local start_line = vim.fn.getpos("'<")[2]
+  local end_line = vim.fn.getpos("'>")[2]
   if start_line == 0 or end_line == 0 then
     return nil
   end
@@ -394,7 +392,6 @@ function M.instruct_visual()
     vim.notify("plan-agent: no selection", vim.log.levels.WARN)
     return
   end
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
   if not M.start() then
     return
   end

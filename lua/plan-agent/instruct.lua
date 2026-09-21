@@ -147,14 +147,54 @@ function M.working(chars)
   })
 end
 
+--- True when the reply reads as conversational chatter ("I'm ready but I
+--- don't see…", "Send the…") rather than the requested Markdown. Plan prose
+--- almost never opens this way; when it fires the buffer stays untouched.
+--- Exposed for tests.
+---@param text string
+---@return boolean
+function M.chatty(text)
+  local trimmed = text:gsub("^%s+", "")
+  if trimmed:find("^I'm ", 1, true) == 1 then
+    return true
+  end
+  if trimmed:find("^I don't ", 1, true) == 1 then
+    return true
+  end
+  if trimmed:find("^I can't ", 1, true) == 1 then
+    return true
+  end
+  if trimmed:find("Send the ", 1, true) and trimmed:find("plus what", 1, true) then
+    return true
+  end
+  return false
+end
+
 --- Deliver assistant text: replace the range with the proposal.
 --- An empty proposal deletes the range. A deleted sigil vetoes the job:
---- the result is dropped, buffer untouched.
+--- the result is dropped, buffer untouched. Chatty non-answers are dropped
+--- the same way, with a warning instead of writing chatter into the doc.
 ---@param text string
 function M.deliver(text)
   local anchor = pending_anchor
   pending_anchor = nil
   if not anchor or not vim.api.nvim_buf_is_valid(anchor.bufnr) then
+    return
+  end
+  if M.chatty(text) then
+    local sigil_row =
+      vim.api.nvim_buf_get_extmark_by_id(anchor.bufnr, anchor_ns, anchor.sigil, {})[1]
+    untrack(anchor.bufnr, anchor.sigil)
+    untrack(anchor.bufnr, anchor.start_mark)
+    untrack(anchor.bufnr, anchor.end_mark)
+    if sigil_row then
+      pcall(vim.api.nvim_buf_set_lines, anchor.bufnr, sigil_row, sigil_row + 1, false, {})
+    end
+    log.info("instruction dropped: chatty reply id=" .. anchor.id)
+    vim.notify(
+      "plan-agent: agent asked for clarification, dropped (:PlanAgentLog)",
+      vim.log.levels.WARN
+    )
     return
   end
   local sigil_row = resolve(anchor.bufnr, anchor.sigil)

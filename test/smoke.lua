@@ -243,13 +243,12 @@ check(
     and doc_prompt:find("1: a", 1, true) ~= nil
 )
 
--- visual range capture
+-- visual range capture via marks: x-mode mappings run after visual exits
 check("range outside visual", pa.visual_range() == nil)
 vim.api.nvim_win_set_buf(win, snap_buf)
 vim.api.nvim_win_set_cursor(win, { 1, 0 })
-vim.cmd("normal! vj")
+vim.cmd("normal! vj\27")
 local vr = pa.visual_range()
-vim.cmd("normal! \27")
 check(
   "visual range",
   vr ~= nil and vr.srow == 0 and vr.erow == 2
@@ -273,6 +272,24 @@ end, { range = { srow = 0, erow = 1 } })
 instruct.deliver("")
 local deleted = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
 check("range deleted", #deleted == 1 and deleted[1] == "c")
+
+-- chatty non-answers never touch the range; the sigil is cleaned up
+check("chatty detected", instruct.chatty("I'm ready – but I don't see the plan"))
+check(
+  "chatty detected",
+  instruct.chatty("Send the plan text plus what should change")
+)
+check("prose is not chatty", instruct.chatty("# Monitor\nReal plan text") == false)
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b", "c" })
+instruct.ask(function(_)
+  return true
+end, { range = { srow = 0, erow = 2 } })
+instruct.deliver("I'm ready – but I don't see the Markdown plan.")
+local kept = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check(
+  "chatty dropped",
+  #kept == 3 and kept[1] == "a" and kept[2] == "b" and instruct.busy() == false
+)
 vim.ui.input = orig_input
 
 -- live session round-trip against the fake binary
