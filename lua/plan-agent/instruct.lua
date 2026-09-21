@@ -155,14 +155,10 @@ end
 ---@return boolean
 function M.chatty(text)
   local trimmed = text:gsub("^%s+", "")
-  if trimmed:find("^I'm ", 1, true) == 1 then
-    return true
-  end
-  if trimmed:find("^I don't ", 1, true) == 1 then
-    return true
-  end
-  if trimmed:find("^I can't ", 1, true) == 1 then
-    return true
+  for _, opening in ipairs({ "I'm ", "I don't ", "I can't " }) do
+    if trimmed:sub(1, #opening) == opening then
+      return true
+    end
   end
   if trimmed:find("Send the ", 1, true) and trimmed:find("plus what", 1, true) then
     return true
