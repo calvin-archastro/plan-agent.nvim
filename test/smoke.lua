@@ -73,9 +73,16 @@ check(
   "directive trails document",
   suggest_text:find("END FOCUS", 1, true) < suggest_text:find("Task: write ONLY", 1, true)
 )
+local replace_prompt = context.propose_prompt(buf, { srow = 19, erow = 22 }, "expand it")
 check(
   "propose prompt",
-  context.propose_prompt(buf, 20, "expand it"):find("expand it", 1, true) ~= nil
+  replace_prompt:find("expand it", 1, true) ~= nil
+    and replace_prompt:find("Replace lines 20-22", 1, true) ~= nil
+)
+local insert_prompt = context.propose_prompt(buf, { srow = 20, erow = 20 }, "add it")
+check(
+  "insert prompt",
+  insert_prompt:find("Insert after line 20", 1, true) ~= nil
 )
 
 -- ghost show/accept on a real window
@@ -291,6 +298,13 @@ check("range deleted", #deleted == 1 and deleted[1] == "c")
 
 -- chatty non-answers never touch the range; the sigil is cleaned up
 check("chatty detected", instruct.chatty("I'm ready – but I don't see the plan"))
+check(
+  "task-echo is chatty",
+  instruct.chatty(
+    "Understood – send the plan text and the edit you want, "
+      .. "and I'll reply with the revised Markdown only."
+  )
+)
 check(
   "chatty detected",
   instruct.chatty("Send the plan text plus what should change")

@@ -101,10 +101,9 @@ function M.ask(send, opts)
       return
     end
     pending_anchor = { bufnr = bufnr, sigil = sigil, start_mark = start_mark, end_mark = end_mark, id = id }
-    local anchor_line = range.srow + 1
     log.info("instruction asked lines " .. (range.srow + 1) .. "-" .. range.erow .. " id=" .. id)
     local diff = opts and opts.diff_fn and opts.diff_fn(bufnr) or nil
-    if not send(context.propose_prompt(bufnr, anchor_line, instruction, diff)) then
+    if not send(context.propose_prompt(bufnr, range, instruction, diff)) then
       pending_anchor = nil
       untrack(bufnr, sigil)
       untrack(bufnr, start_mark)
@@ -159,6 +158,37 @@ function M.chatty(text)
     if trimmed:sub(1, #opening) == opening then
       return true
     end
+  end
+  local lower = trimmed:lower()
+  for _, phrase in ipairs({
+    "send the plan",
+    "the edit you want",
+    "the revision you want",
+    "what change",
+    "what edit",
+    "please provide",
+    "please paste",
+    "please send",
+    "paste the",
+    "paste your",
+    "don't have",
+    "do not have",
+    "don't see",
+    "do not see",
+    "can't see",
+    "cannot see",
+    "i need the",
+    "which part",
+    "which section",
+    "i'll reply with the revised",
+    "ill reply with the revised",
+  }) do
+    if lower:find(phrase, 1, true) then
+      return true
+    end
+  end
+  if lower:sub(1, 11) == "understood " or lower:sub(1, 11) == "understood," then
+    return true
   end
   if trimmed:find("Send the ", 1, true) and trimmed:find("plus what", 1, true) then
     return true

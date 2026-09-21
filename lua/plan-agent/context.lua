@@ -104,17 +104,34 @@ function M.suggest_prompt(bufnr, anchor, diff)
   return table.concat(parts, "\n")
 end
 
---- Propose prompt: full doc, marked focus, answer with added lines only.
+--- Propose prompt: full doc, marked focus, explicit target and operation.
+--- A nonzero-width range is a REPLACE of those lines; a zero-width range
+--- is an INSERT after that line. The model must never have to infer which.
 ---@param bufnr number
----@param anchor integer 1-indexed
+---@param range { srow: integer, erow: integer } 0-indexed, end-exclusive
 ---@param instruction string
 ---@param diff string|nil unified diff of local edits
 ---@return string
-function M.propose_prompt(bufnr, anchor, instruction, diff)
+function M.propose_prompt(bufnr, range, instruction, diff)
   local path = vim.api.nvim_buf_get_name(bufnr)
+  local anchor = range.srow + 1
+  local operation
+  if range.erow > range.srow then
+    operation = "Replace lines "
+      .. anchor
+      .. "-"
+      .. range.erow
+      .. " (the >>> FOCUS block) with the rewritten text. "
+      .. "Reply with ONLY the replacement lines. "
+      .. "Reply with an empty string to delete the target range."
+  else
+    operation = "Insert after line "
+      .. anchor
+      .. ". Reply with ONLY the new lines to insert there."
+  end
   local parts = {
     "File: " .. path,
-    "Instruction at line " .. anchor .. ": " .. instruction,
+    "Instruction: " .. instruction,
     "Full document (focus marked):",
     M.document(bufnr, anchor, 30),
   }
@@ -122,9 +139,9 @@ function M.propose_prompt(bufnr, anchor, instruction, diff)
   if section then
     parts[#parts + 1] = section
   end
-  parts[#parts + 1] = "Task: reply with ONLY the Markdown lines for the instruction above. "
-    .. "No fences, no explanation, no narration. "
-    .. "Reply with an empty string to delete the target range."
+  parts[#parts + 1] = "Task: "
+    .. operation
+    .. " No fences, no explanation, no narration, no questions."
   return table.concat(parts, "\n")
 end
 
