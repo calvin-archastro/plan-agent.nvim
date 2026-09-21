@@ -54,6 +54,8 @@ function M.current()
 end
 
 --- Insert the pending ghost at the cursor. Single undo block.
+--- The edit is scheduled: expr mappings run under textlock, which forbids
+--- buffer writes inline. Cursor and buffer are captured synchronously.
 ---@return boolean accepted
 function M.accept()
   local ghost = current
@@ -65,13 +67,19 @@ function M.accept()
   local row = cursor[1] - 1
   local col = cursor[2]
   local lines = vim.split(ghost.text, "\n", { plain = true })
-  vim.api.nvim_buf_set_text(ghost.bufnr, row, col, row, col, lines)
-  local last = lines[#lines]
-  if #lines > 1 then
-    vim.api.nvim_win_set_cursor(0, { row + #lines, #last })
-  else
-    vim.api.nvim_win_set_cursor(0, { row + 1, col + #last })
-  end
+  local bufnr = ghost.bufnr
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    vim.api.nvim_buf_set_text(bufnr, row, col, row, col, lines)
+    local last = lines[#lines]
+    if #lines > 1 then
+      vim.api.nvim_win_set_cursor(0, { row + #lines, #last })
+    else
+      vim.api.nvim_win_set_cursor(0, { row + 1, col + #last })
+    end
+  end)
   return true
 end
 
