@@ -243,10 +243,25 @@ check(
     and doc_prompt:find("1: a", 1, true) ~= nil
 )
 
--- visual range capture via marks: x-mode mappings run after visual exits
+-- visual range capture: live positions mid-visual, marks after exit
 check("range outside visual", pa.visual_range() == nil)
 vim.api.nvim_win_set_buf(win, snap_buf)
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b", "c" })
 vim.api.nvim_win_set_cursor(win, { 1, 0 })
+_G._vr_probe = nil
+vim.keymap.set("x", "<F9>", function()
+  _G._vr_probe = pa.visual_range()
+end, { buffer = snap_buf })
+vim.api.nvim_feedkeys(
+  "vj" .. vim.api.nvim_replace_termcodes("<F9>", true, false, true),
+  "x!",
+  false
+)
+local mid = _G._vr_probe
+_G._vr_probe = nil
+vim.keymap.del("x", "<F9>", { buffer = snap_buf })
+vim.cmd("normal! \27")
+check("visual range mid-visual", mid ~= nil and mid.srow == 0 and mid.erow == 2)
 vim.cmd("normal! vj\27")
 local vr = pa.visual_range()
 check(
