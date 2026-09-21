@@ -114,6 +114,8 @@ end
 ---@return string
 function M.propose_prompt(bufnr, range, instruction, diff)
   local path = vim.api.nvim_buf_get_name(bufnr)
+  -- Replace covers 1-indexed lines srow+1..erow; a zero-width position
+  -- srow inserts after 1-indexed line srow.
   local anchor = range.srow + 1
   local operation
   if range.erow > range.srow then
@@ -125,6 +127,7 @@ function M.propose_prompt(bufnr, range, instruction, diff)
       .. "Reply with ONLY the replacement lines. "
       .. "Reply with an empty string to delete the target range."
   else
+    anchor = range.srow
     operation = "Insert after line "
       .. anchor
       .. ". Reply with ONLY the new lines to insert there."
