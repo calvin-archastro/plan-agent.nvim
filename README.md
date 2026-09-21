@@ -22,6 +22,7 @@ end }
 | `permission_mode` | `"deny"` | tool-free session: text proposals only |
 | `debounce_ms` | `350` | idle delay before requesting a ghost |
 | `prompt` | co-editing brief | standing `--print` prompt (required by `--stream`) |
+| `paths` | `{ "docs/plans/" }` | enabled when the buffer path contains any entry (plain substring, not repo-root-relative) |
 
 Suggested keymaps:
 
@@ -45,6 +46,17 @@ Add `%{v:lua.require'plan-agent'.status()}` to your statusline for
    (one undo block), `q` rejects.
 3. The anchor is an extmark: edits above it don't detach the proposal.
 
+## Enabling other files
+
+Two ways, combinable:
+
+1. Directories: `require("plan-agent").setup({ paths = { "docs/plans/", "my/notes/" } })`
+2. One file: `:PlanAgentEnable` opts the current buffer in, `:PlanAgentDisable` opts it out (buffer-local, beats path matching)
+
 ## Commands
 
-`:PlanAgentStart :PlanAgentStop :PlanAgentStatus :PlanAgentSuggest :PlanAgentInstruct`
+`:PlanAgentStart :PlanAgentStop :PlanAgentStatus :PlanAgentSuggest :PlanAgentInstruct :PlanAgentEnable :PlanAgentDisable`
+
+## Tests
+
+Stock nvim only: `nvim --headless --noplugin -u NONE -l test/smoke.lua`

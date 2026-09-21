@@ -13,6 +13,8 @@ local defaults = {
   model = nil,
   permission_mode = "deny",
   debounce_ms = 350,
+  -- Enabled when the buffer path contains any entry (plain substring).
+  paths = { "docs/plans/" },
   prompt = "You co-edit a Markdown plan beside the user. "
     .. "Reply with ONLY the requested text: no fences, no explanation.",
 }
@@ -25,9 +27,22 @@ local pending_buf = nil ---@type number|nil
 local pending_seq = 0
 local timer = nil
 
-local function is_plan_file(bufnr)
-  local name = vim.api.nvim_buf_get_name(bufnr or 0)
-  return name:find("docs/plans/", 1, true) ~= nil and name:sub(-3) == ".md"
+--- Buffer-local opt-out wins, then opt-in, then path matching.
+---@param bufnr number|nil
+---@return boolean
+local function is_enabled(bufnr)
+  bufnr = bufnr or 0
+  local override = vim.b[bufnr].plan_agent_enabled
+  if override ~= nil then
+    return override
+  end
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  for _, entry in ipairs(config.paths) do
+    if name:find(entry, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
 end
 
 --- Statusline fragment: PA:idle | PA:working | PA:proposal | PA:down.
@@ -115,7 +130,7 @@ function M.on_event(event)
   pending_kind = nil
   pending_buf = nil
   if kind == "suggest" then
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and is_plan_file(bufnr) then
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and is_enabled(bufnr) then
       ghost.show(bufnr, event.content)
     end
   elseif kind == "propose" then
@@ -144,7 +159,7 @@ end
 ---@return boolean sent
 function M.suggest()
   local bufnr = vim.api.nvim_get_current_buf()
-  if not is_plan_file(bufnr) then
+  if not is_enabled(bufnr) then
     return false
   end
   if instruct.busy() then
@@ -160,7 +175,7 @@ function M.schedule_suggest()
     timer = nil
   end
   ghost.clear()
-  if not is_plan_file(0) or instruct.busy() then
+  if not is_enabled(0) or instruct.busy() then
     return
   end
   timer = vim.defer_fn(function()
@@ -188,7 +203,7 @@ end
 --- Open an anchored instruction at the cursor line.
 function M.instruct_ask()
   local bufnr = vim.api.nvim_get_current_buf()
-  if not is_plan_file(bufnr) then
+  if not is_enabled(bufnr) then
     vim.notify("plan-agent: not a plan file", vim.log.levels.WARN)
     return
   end
@@ -207,7 +222,7 @@ function M.setup(opts)
   local group = vim.api.nvim_create_augroup("plan_agent", { clear = true })
   vim.api.nvim_create_autocmd({ "CursorMovedI", "TextChangedI" }, {
     group = group,
-    pattern = "*/docs/plans/*.md",
+    pattern = "*",
     callback = M.schedule_suggest,
   })
   vim.api.nvim_create_autocmd("VimLeavePre", {
@@ -221,6 +236,17 @@ function M.setup(opts)
   end, {})
   vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, {})
   vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, {})
+  -- Exposed for tests.
+  M.enabled = is_enabled
+  vim.api.nvim_create_user_command("PlanAgentEnable", function()
+    vim.b.plan_agent_enabled = true
+    vim.notify("plan-agent: enabled for this buffer", vim.log.levels.INFO)
+  end, {})
+  vim.api.nvim_create_user_command("PlanAgentDisable", function()
+    vim.b.plan_agent_enabled = false
+    M.dismiss_ghost()
+    vim.notify("plan-agent: disabled for this buffer", vim.log.levels.INFO)
+  end, {})
 end
 
 return M
