@@ -9,6 +9,8 @@ local instruct = require("plan-agent.instruct")
 local M = {}
 
 local defaults = {
+  -- String binary on PATH, or argv prefix list for dev builds, e.g.
+  -- {"node", "/path/to/src/ts/archdev/dist/index.js"}.
   binary = "archdev",
   model = nil,
   permission_mode = "deny",
@@ -26,6 +28,7 @@ local pending_kind = nil ---@type "suggest"|"propose"|nil
 local pending_buf = nil ---@type number|nil
 local pending_seq = 0
 local timer = nil
+local last_stderr = {} ---@type string[]
 
 --- Buffer-local opt-out wins, then opt-in, then path matching.
 ---@param bufnr number|nil
@@ -60,6 +63,21 @@ function M.status()
   return "PA:down"
 end
 
+--- Build the session argv from config. Exposed for tests.
+---@return string[]
+function M.session_cmd()
+  local cmd = {}
+  if type(config.binary) == "table" then
+    for _, part in ipairs(config.binary) do
+      cmd[#cmd + 1] = part
+    end
+  else
+    cmd[#cmd + 1] = config.binary
+  end
+  vim.list_extend(cmd, { "agents", "run", config.prompt, "--stream" })
+  return cmd
+end
+
 --- Start the persistent session. Idempotent.
 ---@return boolean
 function M.start()
@@ -67,19 +85,28 @@ function M.start()
     return true
   end
   M.stop()
-  local cmd = { config.binary, "agents", "run", config.prompt, "--stream" }
+  local cmd = M.session_cmd()
   if config.model then
     vim.list_extend(cmd, { "--model", config.model })
   end
   if config.permission_mode then
     vim.list_extend(cmd, { "--permission-mode", config.permission_mode })
   end
+  last_stderr = {}
   local new_handle, err = session.start({
     cmd = cmd,
     on_event = function(event)
       vim.schedule(function()
         M.on_event(event)
       end)
+    end,
+    on_stderr = function(lines)
+      for _, line in ipairs(lines) do
+        last_stderr[#last_stderr + 1] = line
+        if #last_stderr > 3 then
+          table.remove(last_stderr, 1)
+        end
+      end
     end,
     on_malformed = function(line)
       vim.schedule(function()
@@ -90,7 +117,15 @@ function M.start()
       vim.schedule(function()
         pending_kind = nil
         ghost.clear()
-        vim.notify("plan-agent: session exited (" .. code .. ")", vim.log.levels.WARN)
+        -- Clean completion exits are routine (the headless run ends with
+        -- its answer); only abnormal exits notify, with stderr attached.
+        if code ~= 0 then
+          local detail = table.concat(last_stderr, " "):sub(1, 160)
+          vim.notify(
+            "plan-agent: session exited (" .. code .. ") " .. detail,
+            vim.log.levels.ERROR
+          )
+        end
       end)
     end,
   })
@@ -229,24 +264,24 @@ function M.setup(opts)
     group = group,
     callback = M.stop,
   })
-  vim.api.nvim_create_user_command("PlanAgentStart", M.start, {})
-  vim.api.nvim_create_user_command("PlanAgentStop", M.stop, {})
+  vim.api.nvim_create_user_command("PlanAgentStart", M.start, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentStop", M.stop, { force = true })
   vim.api.nvim_create_user_command("PlanAgentStatus", function()
     vim.notify("plan-agent: " .. M.status(), vim.log.levels.INFO)
-  end, {})
-  vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, {})
-  vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, {})
+  end, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, { force = true })
   -- Exposed for tests.
   M.enabled = is_enabled
   vim.api.nvim_create_user_command("PlanAgentEnable", function()
     vim.b.plan_agent_enabled = true
     vim.notify("plan-agent: enabled for this buffer", vim.log.levels.INFO)
-  end, {})
+  end, { force = true })
   vim.api.nvim_create_user_command("PlanAgentDisable", function()
     vim.b.plan_agent_enabled = false
     M.dismiss_ghost()
     vim.notify("plan-agent: disabled for this buffer", vim.log.levels.INFO)
-  end, {})
+  end, { force = true })
 end
 
 return M

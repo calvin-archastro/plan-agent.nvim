@@ -89,6 +89,20 @@ check("buffer enable", pa.enabled(other_buf) == true)
 vim.api.nvim_buf_set_var(plans_buf, "plan_agent_enabled", false)
 check("buffer disable", pa.enabled(plans_buf) == false)
 
+-- session argv shapes
+pa.setup({ binary = "archdev" })
+local cmd = pa.session_cmd()
+check(
+  "cmd string",
+  cmd[1] == "archdev" and cmd[2] == "agents" and cmd[#cmd] == "--stream"
+)
+pa.setup({ binary = { "node", "/x/dist/index.js" } })
+local cmd2 = pa.session_cmd()
+check(
+  "cmd list",
+  cmd2[1] == "node" and cmd2[2] == "/x/dist/index.js" and cmd2[3] == "agents"
+)
+
 -- live session round-trip against the fake binary
 local got_events = {}
 local h, err = session.start({

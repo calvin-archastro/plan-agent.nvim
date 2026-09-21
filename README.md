@@ -17,7 +17,7 @@ end }
 
 | key | default | meaning |
 | --- | ------- | ------- |
-| `binary` | `"archdev"` | CLI on PATH |
+| `binary` | `"archdev"` | CLI on PATH, or argv-prefix list for dev builds: `{"node", "…/dist/index.js"}` |
 | `model` | `nil` | `--model` for the session |
 | `permission_mode` | `"deny"` | tool-free session: text proposals only |
 | `debounce_ms` | `350` | idle delay before requesting a ghost |
