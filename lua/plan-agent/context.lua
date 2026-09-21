@@ -88,7 +88,6 @@ function M.suggest_prompt(bufnr, anchor, diff)
   local parts = {
     "File: " .. path,
     "Cursor line: " .. anchor,
-    "Reply with ONLY the new continuation text for the cursor position: no fences, no explanation, and never repeat text already in the document.",
     "Full document (focus marked):",
     M.document(bufnr, anchor, 10),
   }
@@ -96,6 +95,12 @@ function M.suggest_prompt(bufnr, anchor, diff)
   if section then
     parts[#parts + 1] = section
   end
+  -- Directive last: models follow trailing instructions most reliably.
+  -- It restates the whole job so a long document cannot bury it.
+  parts[#parts + 1] = "Task: write ONLY the new continuation text for the cursor line above. "
+    .. "No fences, no explanation, no narration, no questions. "
+    .. "Never repeat text already in the document. "
+    .. "If there is nothing to add, reply with an empty string."
   return table.concat(parts, "\n")
 end
 
@@ -110,9 +115,6 @@ function M.propose_prompt(bufnr, anchor, instruction, diff)
   local parts = {
     "File: " .. path,
     "Instruction at line " .. anchor .. ": " .. instruction,
-    "Reply with ONLY the Markdown lines to insert after line "
-      .. anchor
-      .. ", no fences, no explanation.",
     "Full document (focus marked):",
     M.document(bufnr, anchor, 30),
   }
@@ -120,6 +122,9 @@ function M.propose_prompt(bufnr, anchor, instruction, diff)
   if section then
     parts[#parts + 1] = section
   end
+  parts[#parts + 1] = "Task: reply with ONLY the Markdown lines for the instruction above. "
+    .. "No fences, no explanation, no narration. "
+    .. "Reply with an empty string to delete the target range."
   return table.concat(parts, "\n")
 end
 

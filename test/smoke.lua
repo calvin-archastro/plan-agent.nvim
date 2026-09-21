@@ -68,6 +68,11 @@ check(
   "suggest prompt",
   context.suggest_prompt(buf, 20):find("Cursor line: 20", 1, true) ~= nil
 )
+local suggest_text = context.suggest_prompt(buf, 20)
+check(
+  "directive trails document",
+  suggest_text:find("END FOCUS", 1, true) < suggest_text:find("Task: write ONLY", 1, true)
+)
 check(
   "propose prompt",
   context.propose_prompt(buf, 20, "expand it"):find("expand it", 1, true) ~= nil

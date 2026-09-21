@@ -286,6 +286,7 @@ local function send(kind, content)
   continuations = 0
   propose_chars = 0
   log.debug("send: kind=" .. kind .. " bytes=" .. #content)
+  log.debug("send head: " .. content:sub(1, 200):gsub("\n", "\\n"))
   if not handle.send(content) then
     log.error("send failed: session is down")
     pending_kind = nil
