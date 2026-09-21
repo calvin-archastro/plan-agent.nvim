@@ -1,6 +1,11 @@
---- plan-agent.context: build the anchor windows sent to the session.
---- Ghost: anchor ±10 lines. Propose: anchor ±30 lines. Never the repo.
+--- plan-agent.context: full buffer plus a marked focus region.
+--- Ghost focus: anchor ±10 lines. Propose focus: anchor ±30 lines.
+--- The whole doc goes in (plans are small); the focus region says WHERE,
+--- and the changed note says what moved since the last request.
 local M = {}
+
+--- Soft cap: larger buffers keep head, focus, and tail with an omission note.
+M.max_lines = 500
 
 --- Read the lines around a 1-indexed anchor line, clamped to the buffer.
 ---@param bufnr number
@@ -27,39 +32,95 @@ function M.render(lines, first)
   return table.concat(out, "\n")
 end
 
---- Ghost prompt: continue the text at the anchor line, reply text only.
----@param bufnr number
----@param anchor integer 1-indexed
----@return string
-function M.suggest_prompt(bufnr, anchor)
-  local path = vim.api.nvim_buf_get_name(bufnr)
-  local lines, first = M.window(bufnr, anchor, 10)
-  return table.concat({
-    "File: " .. path,
-    "Cursor line: " .. anchor,
-    "Reply with ONLY the completion text for the cursor position, no fences, no explanation.",
-    "Context:",
-    M.render(lines, first),
-  }, "\n")
+--- Unified-diff section for local edits, or nil when there is nothing new.
+--- The model reads hunks directly; + lines are the current buffer.
+---@param diff string|nil
+---@return string|nil
+function M.diff_section(diff)
+  if diff == nil or diff == "" then
+    return nil
+  end
+  return "Local edits since last request (unified diff, + lines are current):\n" .. diff
 end
 
---- Propose prompt: answer the instruction with added lines only.
+--- Full numbered doc with the focus region marked and middle truncated
+--- past the cap.
+---@param bufnr number
+---@param anchor integer 1-indexed
+---@param radius integer focus half-width
+---@return string
+function M.document(bufnr, anchor, radius)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local total = #lines
+  anchor = math.max(1, math.min(anchor, math.max(total, 1)))
+  local out = {}
+  local omitted = 0
+  local focus_first = math.max(1, anchor - radius)
+  local focus_last = math.min(total, anchor + radius)
+  for i, line in ipairs(lines) do
+    local in_focus = math.abs(i - anchor) <= radius
+    local keep = in_focus or i <= 25 or i > total - 25
+    if total <= M.max_lines or keep then
+      if i == focus_first then
+        out[#out + 1] = ">>> FOCUS (cursor at line " .. anchor .. ")"
+      end
+      out[#out + 1] = string.format("%d: %s", i, line)
+      if i == focus_last then
+        out[#out + 1] = "<<< END FOCUS"
+      end
+    else
+      omitted = omitted + 1
+    end
+  end
+  if omitted > 0 then
+    out[#out + 1] = "[... " .. omitted .. " lines omitted outside focus ...]"
+  end
+  return table.concat(out, "\n")
+end
+
+--- Ghost prompt: full doc, marked focus, reply text only.
+---@param bufnr number
+---@param anchor integer 1-indexed
+---@param diff string|nil unified diff of local edits
+---@return string
+function M.suggest_prompt(bufnr, anchor, diff)
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  local parts = {
+    "File: " .. path,
+    "Cursor line: " .. anchor,
+    "Reply with ONLY the new continuation text for the cursor position: no fences, no explanation, and never repeat text already in the document.",
+    "Full document (focus marked):",
+    M.document(bufnr, anchor, 10),
+  }
+  local section = M.diff_section(diff)
+  if section then
+    parts[#parts + 1] = section
+  end
+  return table.concat(parts, "\n")
+end
+
+--- Propose prompt: full doc, marked focus, answer with added lines only.
 ---@param bufnr number
 ---@param anchor integer 1-indexed
 ---@param instruction string
+---@param diff string|nil unified diff of local edits
 ---@return string
-function M.propose_prompt(bufnr, anchor, instruction)
+function M.propose_prompt(bufnr, anchor, instruction, diff)
   local path = vim.api.nvim_buf_get_name(bufnr)
-  local lines, first = M.window(bufnr, anchor, 30)
-  return table.concat({
+  local parts = {
     "File: " .. path,
     "Instruction at line " .. anchor .. ": " .. instruction,
     "Reply with ONLY the Markdown lines to insert after line "
       .. anchor
       .. ", no fences, no explanation.",
-    "Context:",
-    M.render(lines, first),
-  }, "\n")
+    "Full document (focus marked):",
+    M.document(bufnr, anchor, 30),
+  }
+  local section = M.diff_section(diff)
+  if section then
+    parts[#parts + 1] = section
+  end
+  return table.concat(parts, "\n")
 end
 
 return M

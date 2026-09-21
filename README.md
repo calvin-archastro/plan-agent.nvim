@@ -40,15 +40,18 @@ Add `%{v:lua.require'plan-agent'.status()}` to your statusline for
 
 ## Flows
 
-1. **Ghost**: pause in a plan file → grey inline text → `<Tab>` inserts,
-   moving on or a new request dismisses. A ghost that arrives mid-thought
-   keeps streaming: it paints immediately, sends `continue` itself (up to
-   `max_continuations = 2`), and extends in place.
+1. **Ghost**: pause in a plan file → completion block appears below the
+   cursor (never interleaved with your text) → `<Tab>` inserts at the
+   recorded position, moving on dismisses. A ghost that arrives mid-thought
+   paints immediately, sends `continue` itself (up to `max_continuations =
+   2`), and extends in place.
 2. **Instruction** (`ga` / `:PlanAgentInstruct`): type a note at the cursor
    line → a sigil line appears (`<!-- ◌ plan-agent:<id> … -->`) with a live
    char count while the agent works → the sigil expands into the proposal
    in place (one undo block, `u` reverts). Delete the sigil and the result
    is dropped. No windows open; keep writing anywhere meanwhile.
+3. **Rewrite** (visual `ga`): select lines first — the range is replaced
+   with the proposal, possibly with nothing (delete). Same sigil veto.
 3. The anchor is an extmark: edits above it don't detach the proposal.
 
 ## Enabling other files
@@ -69,6 +72,13 @@ full argv, sends, event types, ghost renders, instruction lifecycle, exit
 codes with stderr attached. For the full firehose (every event, trigger,
 skip reason), `setup({ debug = true })`. Next time something fails, paste
 the log — no more guessing.
+
+## Context
+
+Every request sends the full buffer (numbered, 500-line soft cap) with a
+marked `>>> FOCUS` region around your cursor, plus a unified diff of your
+unsent edits (`vim.diff` hunks, + lines are current) so the model sees
+what moved. Ghosts are told never to repeat document text.
 
 ## Tests
 

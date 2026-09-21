@@ -33,9 +33,11 @@ local config = vim.deepcopy(defaults)
 local handle = nil
 local pending_kind = nil ---@type "suggest"|"propose"|nil
 local pending_buf = nil ---@type number|nil
+local pending_pos = nil ---@type { row: integer, col: integer }|nil
 local pending_seq = 0
 local continuations = 0
 local propose_chars = 0
+local snapshots = {} ---@type table<number, string>
 local timer = nil
 local last_stderr = {} ---@type string[]
 
@@ -70,6 +72,28 @@ function M.status()
     return "PA:idle"
   end
   return "PA:down"
+end
+
+--- Diff the buffer against its last-sent snapshot (unified hunks the
+--- model reads directly), then store the new snapshot. Empty on first
+--- send or when nothing changed. Exposed for tests.
+---@param bufnr number
+---@return string
+function M.snapshot_diff(bufnr)
+  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  local prev = snapshots[bufnr]
+  snapshots[bufnr] = text
+  if not prev or prev == text then
+    return ""
+  end
+  local ok, diff = pcall(vim.diff, prev, text, { result_type = "unified" })
+  if not ok or type(diff) ~= "string" or diff == "" then
+    return ""
+  end
+  if #diff > 4000 then
+    diff = diff:sub(1, 4000) .. "\n[... diff truncated ...]"
+  end
+  return diff
 end
 
 --- Build the session argv from config. Exposed for tests.
@@ -164,6 +188,7 @@ function M.stop()
   end
   pending_kind = nil
   pending_buf = nil
+  pending_pos = nil
   continuations = 0
   ghost.clear()
 end
@@ -206,7 +231,7 @@ function M.on_event(event)
       if shown and shown.bufnr == bufnr then
         text = shown.text .. text
       end
-      ghost.show(bufnr, text)
+      ghost.show(bufnr, text, pending_pos)
       if
         M.truncated(event.content)
         and continuations < config.max_continuations
@@ -222,10 +247,12 @@ function M.on_event(event)
     end
     pending_kind = nil
     pending_buf = nil
+    pending_pos = nil
     continuations = 0
   else
     pending_kind = nil
     pending_buf = nil
+    pending_pos = nil
     continuations = 0
     if kind == "propose" then
       instruct.deliver(event.content)
@@ -254,6 +281,8 @@ local function send(kind, content)
   ghost.clear()
   pending_kind = kind
   pending_buf = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  pending_pos = { row = cursor[1] - 1, col = cursor[2] }
   continuations = 0
   propose_chars = 0
   log.debug("send: kind=" .. kind .. " bytes=" .. #content)
@@ -280,7 +309,7 @@ function M.suggest()
     return false
   end
   local anchor = vim.api.nvim_win_get_cursor(0)[1]
-  return send("suggest", context.suggest_prompt(bufnr, anchor))
+  return send("suggest", context.suggest_prompt(bufnr, anchor, M.snapshot_diff(bufnr)))
 end
 
 function M.schedule_suggest()
@@ -318,7 +347,7 @@ end
 function M.instruct_ask()
   local bufnr = vim.api.nvim_get_current_buf()
   if not is_enabled(bufnr) then
-    vim.notify("plan-agent: not a plan file", vim.log.levels.WARN)
+    vim.notify("plan-agent: not enabled here (:PlanAgentEnable)", vim.log.levels.WARN)
     return
   end
   if not M.start() then
@@ -326,7 +355,56 @@ function M.instruct_ask()
   end
   instruct.ask(function(content)
     return send("propose", content)
-  end)
+  end, {
+    diff_fn = function(buf)
+      return M.snapshot_diff(buf)
+    end,
+  })
+end
+
+--- Current visual selection as a 0-indexed [start, exclusive end) range.
+--- Whole lines; a charwise selection rounds out. Nil when not visual.
+---@return { srow: integer, erow: integer }|nil
+function M.visual_range()
+  local mode = vim.fn.mode()
+  if mode ~= "v" and mode ~= "V" and mode ~= "\22" then
+    return nil
+  end
+  local start_line = vim.fn.getpos("v")[2]
+  local end_line = vim.fn.getpos(".")[2]
+  if start_line == 0 or end_line == 0 then
+    return nil
+  end
+  return {
+    srow = math.min(start_line, end_line) - 1,
+    erow = math.max(start_line, end_line),
+  }
+end
+
+--- Open an instruction rewriting the visual selection (possibly to nothing).
+function M.instruct_visual()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not is_enabled(bufnr) then
+    vim.notify("plan-agent: not enabled here (:PlanAgentEnable)", vim.log.levels.WARN)
+    return
+  end
+  local range = M.visual_range()
+  if not range then
+    vim.notify("plan-agent: no selection", vim.log.levels.WARN)
+    return
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
+  if not M.start() then
+    return
+  end
+  instruct.ask(function(content)
+    return send("propose", content)
+  end, {
+    range = range,
+    diff_fn = function(buf)
+      return M.snapshot_diff(buf)
+    end,
+  })
 end
 
 --- Plugin setup. Call once from your config.
@@ -352,6 +430,7 @@ function M.setup(opts)
   end, { force = true })
   vim.api.nvim_create_user_command("PlanAgentSuggest", M.suggest, { force = true })
   vim.api.nvim_create_user_command("PlanAgentInstruct", M.instruct_ask, { force = true })
+  vim.api.nvim_create_user_command("PlanAgentVisual", M.instruct_visual, { force = true })
   vim.api.nvim_create_user_command("PlanAgentLog", function()
     log.open()
   end, { force = true })

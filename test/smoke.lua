@@ -77,6 +77,28 @@ check(
 vim.api.nvim_win_set_cursor(win, { 20, 0 })
 check("ghost show", ghost.show(buf, "XX") == true)
 check("ghost current", ghost.current() ~= nil)
+local ghost_ns = vim.api.nvim_create_namespace("plan_agent_ghost")
+local function ghost_block()
+  local marks = vim.api.nvim_buf_get_extmarks(buf, ghost_ns, 0, -1, { details = true })
+  for _, m in ipairs(marks) do
+    local vl = m[4] and m[4].virt_lines
+    if vl then
+      local out = {}
+      for _, l in ipairs(vl) do
+        out[#out + 1] = l[1][1]
+      end
+      return out
+    end
+  end
+  return nil
+end
+local block = ghost_block()
+check(
+  "ghost block",
+  block ~= nil and block[1] == "XX" and block[#block]:find("Tab accept", 1, true) ~= nil
+)
+-- accept lands at the recorded position even after the cursor moved
+vim.api.nvim_win_set_cursor(win, { 5, 0 })
 check("ghost accept", ghost.accept() == true)
 vim.wait(1000, function()
   return vim.api.nvim_buf_get_lines(buf, 19, 20, false)[1] == "XXline 20"
@@ -188,6 +210,64 @@ check(
   "sigil veto",
   #vetoed == 4 and vetoed[2] == "p1" and instruct.busy() == false
 )
+vim.ui.input = orig_input
+
+-- diff context: hunks, not spans
+check("diff section nil", context.diff_section(nil) == nil)
+check("diff section empty", context.diff_section("") == nil)
+local section = context.diff_section("@@ -1 +1 @@\n-a\n+b\n")
+check(
+  "diff section",
+  section ~= nil and section:find("unified diff", 1, true) ~= nil
+)
+local snap_buf = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b" })
+check("snapshot first", pa.snapshot_diff(snap_buf) == "")
+vim.api.nvim_buf_set_lines(snap_buf, 1, 2, false, { "B" })
+local snap_diff = pa.snapshot_diff(snap_buf)
+check(
+  "snapshot diff",
+  snap_diff:find("+B", 1, true) ~= nil and snap_diff:find("@@", 1, true) ~= nil
+)
+check("snapshot clean", pa.snapshot_diff(snap_buf) == "")
+local doc_prompt = context.suggest_prompt(snap_buf, 1, snap_diff)
+check(
+  "prompt carries doc and diff",
+  doc_prompt:find(">>> FOCUS", 1, true) ~= nil
+    and doc_prompt:find("+B", 1, true) ~= nil
+    and doc_prompt:find("1: a", 1, true) ~= nil
+)
+
+-- visual range capture
+check("range outside visual", pa.visual_range() == nil)
+vim.api.nvim_win_set_buf(win, snap_buf)
+vim.api.nvim_win_set_cursor(win, { 1, 0 })
+vim.cmd("normal! vj")
+local vr = pa.visual_range()
+vim.cmd("normal! \27")
+check(
+  "visual range",
+  vr ~= nil and vr.srow == 0 and vr.erow == 2
+)
+
+-- range replace and delete via sigil
+vim.api.nvim_buf_set_lines(snap_buf, 0, -1, false, { "a", "b", "c" })
+vim.api.nvim_win_set_cursor(win, { 1, 0 })
+vim.ui.input = function(_, cb)
+  cb("rewrite it")
+end
+instruct.ask(function(_)
+  return true
+end, { range = { srow = 0, erow = 2 } })
+instruct.deliver("X")
+local replaced = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check("range replaced", #replaced == 2 and replaced[1] == "X" and replaced[2] == "c")
+instruct.ask(function(_)
+  return true
+end, { range = { srow = 0, erow = 1 } })
+instruct.deliver("")
+local deleted = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
+check("range deleted", #deleted == 1 and deleted[1] == "c")
 vim.ui.input = orig_input
 
 -- live session round-trip against the fake binary
