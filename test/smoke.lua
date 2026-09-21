@@ -332,13 +332,27 @@ local h, err = session.start({
 check("session spawns", h ~= nil and err == nil)
 check("session send", h.send("hello world") == true)
 vim.wait(2000, function()
-  return #got_events > 0
+  for _, e in ipairs(got_events) do
+    if e.type == "assistant" then
+      return true
+    end
+  end
+  return false
 end)
+local function count(type_name)
+  local n = 0
+  for _, e in ipairs(got_events) do
+    if e.type == type_name then
+      n = n + 1
+    end
+  end
+  return n
+end
 check(
   "round trip",
-  #got_events == 1
-    and got_events[1].type == "assistant"
-    and got_events[1].content:find("echo", 1, true) ~= nil
+  count("assistant") == 1
+    and count("assistant_delta") == 2
+    and got_events[#got_events].type == "assistant"
 )
 h.stop()
 check("session stopped", h.running() == false)

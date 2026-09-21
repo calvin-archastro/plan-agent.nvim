@@ -38,7 +38,7 @@ local pending_buf = nil ---@type number|nil
 local pending_pos = nil ---@type { row: integer, col: integer }|nil
 local pending_seq = 0
 local continuations = 0
-local propose_chars = 0
+local stream_chars = 0
 local snapshots = {} ---@type table<number, string>
 local timer = nil
 local last_stderr = {} ---@type string[]
@@ -197,29 +197,41 @@ function M.stop()
   ghost.clear()
 end
 
+--- Human-sized streamed count for the progress marker.
+---@param n integer
+---@return string
+local function fmt_chars(n)
+  if n >= 1000 then
+    return string.format("%.1fk chars", n / 1000)
+  end
+  return n .. " chars"
+end
+
 --- Route one decoded session event.
 ---@param event table
 function M.on_event(event)
   if type(event) ~= "table" or type(event.type) ~= "string" then
     return
   end
-  if event.type ~= "assistant" or type(event.content) ~= "string" then
-    return
-  end
   local kind = pending_kind
   local bufnr = pending_buf
-  -- Streaming progress for an open instruction; the pending request stays.
-  if
-    kind == "propose"
-    and (event.type == "assistant_delta" or event.type == "assistant_thinking_delta")
-    and type(event.delta) == "string"
-  then
-    propose_chars = propose_chars + #event.delta
-    instruct.working(propose_chars)
+  -- Live deltas feed the progress marker; the pending request stays open
+  -- and the final assistant event still carries the authoritative text.
+  if event.type == "assistant_delta" and type(event.delta) == "string" then
+    if kind then
+      stream_chars = stream_chars + #event.delta
+      progress.note(fmt_chars(stream_chars))
+      if kind == "propose" then
+        instruct.working(stream_chars)
+      end
+    end
     return
   end
   if event.type == "assistant_restart" then
-    propose_chars = 0
+    stream_chars = 0
+    return
+  end
+  if event.type ~= "assistant" or type(event.content) ~= "string" then
     return
   end
   if kind == "suggest" then
@@ -293,7 +305,7 @@ local function send(kind, content)
   local cursor = vim.api.nvim_win_get_cursor(0)
   pending_pos = { row = cursor[1] - 1, col = cursor[2] }
   continuations = 0
-  propose_chars = 0
+  stream_chars = 0
   log.debug("send: kind=" .. kind .. " bytes=" .. #content)
   log.debug("send head: " .. content:sub(1, 200):gsub("\n", "\\n"))
   if not handle.send(content) then

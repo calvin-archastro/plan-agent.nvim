@@ -10,6 +10,7 @@ local progress_ns = vim.api.nvim_create_namespace("plan_agent_progress")
 local mark_id = nil ---@type integer|nil
 local mark_buf = nil ---@type number|nil
 local mark_label = "working" ---@type string
+local detail = nil ---@type string|nil live override (e.g. streamed chars)
 local timer = nil
 local started_at = 0
 
@@ -26,7 +27,10 @@ function M.refresh()
   if not mark_id or not mark_buf or not vim.api.nvim_buf_is_valid(mark_buf) then
     return
   end
-  local secs = math.max(0, math.floor(os.time() - started_at))
+  local right = detail
+  if not right then
+    right = math.max(0, math.floor(os.time() - started_at)) .. "s"
+  end
   local label = mark_label or "working"
   pcall(
     vim.api.nvim_buf_set_extmark,
@@ -36,10 +40,17 @@ function M.refresh()
     0,
     {
       id = mark_id,
-      virt_text = { { "◌ " .. label .. "… " .. secs .. "s", "Comment" } },
+      virt_text = { { "◌ " .. label .. "… " .. right, "Comment" } },
       virt_text_pos = "eol",
     }
   )
+end
+
+--- Set a live detail string (replaces the elapsed time). No-op when hidden.
+---@param text string
+function M.note(text)
+  detail = text
+  M.refresh()
 end
 
 --- Show the marker for one in-flight request.
@@ -81,6 +92,7 @@ function M.stop()
   end
   mark_id = nil
   mark_buf = nil
+  detail = nil
 end
 
 --- True while the marker is up. Exposed for tests.
