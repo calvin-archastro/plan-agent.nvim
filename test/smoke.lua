@@ -312,6 +312,15 @@ pa.deliver_pass(snap_buf, "I'm ready – send the plan", "a\nb\nCHANGED")
 local kept_chatty = vim.api.nvim_buf_get_lines(snap_buf, 0, -1, false)
 check("pass drops chatty", #kept_chatty == 3 and kept_chatty[3] == "CHANGED")
 
+-- progress marker shows while a request is in flight, then clears
+local progress = require("plan-agent.progress")
+check("progress hidden at rest", progress.visible() == false)
+progress.start(snap_buf, "pass")
+check("progress shown", progress.visible() == true)
+progress.refresh()
+progress.stop()
+check("progress cleared", progress.visible() == false)
+
 -- live session round-trip against the fake binary
 local got_events = {}
 local h, err = session.start({

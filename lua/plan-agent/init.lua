@@ -4,6 +4,7 @@
 local session = require("plan-agent.session")
 local log = require("plan-agent.log")
 local ghost = require("plan-agent.ghost")
+local progress = require("plan-agent.progress")
 local context = require("plan-agent.context")
 local instruct = require("plan-agent.instruct")
 
@@ -187,6 +188,7 @@ function M.stop()
     handle.stop()
     handle = nil
   end
+  progress.stop()
   pending_kind = nil
   pending_buf = nil
   pending_pos = nil
@@ -251,11 +253,13 @@ function M.on_event(event)
     pending_buf = nil
     pending_pos = nil
     continuations = 0
+    progress.stop()
   else
     pending_kind = nil
     pending_buf = nil
     pending_pos = nil
     continuations = 0
+    progress.stop()
     if kind == "propose" then
       instruct.deliver(event.content)
     elseif kind == "pass" then
@@ -299,6 +303,7 @@ local function send(kind, content)
     vim.notify("plan-agent: session is down", vim.log.levels.ERROR)
     return false
   end
+  progress.start(pending_buf, kind)
   return true
 end
 
