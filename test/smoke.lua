@@ -262,6 +262,7 @@ _G._vr_probe = nil
 vim.keymap.del("x", "<F9>", { buffer = snap_buf })
 vim.cmd("normal! \27")
 check("visual range mid-visual", mid ~= nil and mid.srow == 0 and mid.erow == 2)
+vim.api.nvim_win_set_cursor(win, { 1, 0 })
 vim.cmd("normal! vj\27")
 local vr = pa.visual_range()
 check(
